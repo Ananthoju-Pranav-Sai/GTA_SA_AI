@@ -1,43 +1,36 @@
-import numpy as np
-from PIL import ImageGrab
 import cv2
-import time
-from direct_keys import PressKey,ReleaseKey,W,A,S,D
+import numpy as np
+import win32gui, win32ui, win32con, win32api
 
-def draw_lines(img,lines):
-    try:
-        for line in lines:
-            coords = line[0]
-            cv2.line(img,(coords[0],coords[1]),(coords[2],coords[3]), [255,255,255], 3)
-    except:
-        pass
+def grab_screen(region=None):
 
-def roi(img, vertices):
-    mask = np.zeros_like(img)
-    cv2.fillPoly(mask,vertices,255)
-    masked = cv2.bitwise_and(img,mask)
-    return masked
+    hwin = win32gui.GetDesktopWindow()
 
-def preprocess_img(img):
-    pro_img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    pro_img = cv2.Canny(pro_img,threshold1=30,threshold2=150)
-    pro_img = cv2.GaussianBlur(pro_img, (3,3), 0 )
-    vertices = np.array([[10,500],[10,300], [300,280], [500,280], [800,300], [800,500]], np.int32)
-    pro_img = roi(pro_img, [vertices])
-    lines = cv2.HoughLinesP(pro_img, 1, np.pi/180, 180, 20, 15)
-    draw_lines(pro_img,lines)
-    return pro_img
+    if region:
+            left,top,x2,y2 = region
+            width = x2 - left + 1
+            height = y2 - top + 1
+    else:
+        width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
+        height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
+        left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
+        top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
 
-def main():
-    last_time = time.time()
-    while(True):
-        screen = np.array(ImageGrab.grab(bbox=(10,40,800,600)))
-        screen = preprocess_img(screen)
-        print(f'Loop took {time.time()-last_time} seconds')
-        last_time = time.time()
-        cv2.imshow('window',screen)
-        if(cv2.waitKey(25) & 0xFF == ord('q')):
-            cv2.destroyAllWindows()
-            break
+    hwindc = win32gui.GetWindowDC(hwin)
+    srcdc = win32ui.CreateDCFromHandle(hwindc)
+    memdc = srcdc.CreateCompatibleDC()
+    bmp = win32ui.CreateBitmap()
+    bmp.CreateCompatibleBitmap(srcdc, width, height)
+    memdc.SelectObject(bmp)
+    memdc.BitBlt((0, 0), (width, height), srcdc, (left, top), win32con.SRCCOPY)
+    
+    signedIntsArray = bmp.GetBitmapBits(True)
+    img = np.fromstring(signedIntsArray, dtype='uint8')
+    img.shape = (height,width,4)
 
-main()
+    srcdc.DeleteDC()
+    memdc.DeleteDC()
+    win32gui.ReleaseDC(hwin, hwindc)
+    win32gui.DeleteObject(bmp.GetHandle())
+
+    return cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
