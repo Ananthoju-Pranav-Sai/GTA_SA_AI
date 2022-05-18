@@ -63,7 +63,7 @@ def main(file_name,start_value):
             screen = grab_screen(region=(10,40,800,600))
 
             screen = cv2.resize(screen,(480,270))
-            screen = cv2.cvtColor(screen,cv2.COLOR_BGR2GRAY)
+            screen = cv2.cvtColor(screen,cv2.COLOR_BGR2RGB)
 
             keys = key_check()
             print(keys)
