@@ -1,3 +1,6 @@
+import os
+os.add_dll_directory("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.7/bin")
+from concurrent.futures import process
 import cv2, time, random
 import numpy as np
 from grab_screen import grab_screen
@@ -5,9 +8,6 @@ from getkeys import key_check
 from collections import deque, Counter
 from model import inception_v3 as googlenet
 from direct_keys import PressKey, ReleaseKey, W, A, S, D
-from statistics import mode, mean
-from motion import motion_detection
-
 
 GAME_WIDTH = 800
 GAME_HEIGHT = 600
@@ -19,8 +19,8 @@ log_len = 25
 motion_req = 800
 motion_log = deque(maxlen = log_len)
 
-WIDTH = 480
-HEIGHT = 270
+WIDTH = 281
+HEIGHT = 791
 LR = 1e-3
 EPOCHS = 10
 
@@ -29,6 +29,20 @@ hl_hist = 250
 choice_hist = deque([], maxlen = hl_hist)
 
 t_time = 0.25
+
+def roi(img, vertices):
+    mask = np.zeros_like(img)
+    cv2.fillPoly(mask, vertices, 255)
+    masked = cv2.bitwise_and(img, mask)
+    return masked
+
+def process_img(original_image):
+    processed_img = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+    vertices = np.array([[10,600],[10,300], [310,280], [500,280], [800,300], [800,600]], np.int32)
+    processed_img = roi(processed_img, [vertices])
+    processed_img = cv2.Canny(processed_img, threshold1=100, threshold2=150)
+    processed_img = processed_img[280:600][:]
+    return processed_img
 
 def straight():
     PressKey(W)
@@ -65,34 +79,6 @@ def reverse():
     ReleaseKey(D)
 
 
-def forward_left():
-    PressKey(W)
-    PressKey(A)
-    ReleaseKey(D)
-    ReleaseKey(S)
-
-
-def forward_right():
-    PressKey(W)
-    PressKey(D)
-    ReleaseKey(A)
-    ReleaseKey(S)
-
-
-def reverse_left():
-    PressKey(S)
-    PressKey(A)
-    ReleaseKey(W)
-    ReleaseKey(D)
-
-
-def reverse_right():
-    PressKey(S)
-    PressKey(D)
-    ReleaseKey(W)
-    ReleaseKey(A)
-
-
 def no_keys():
     if random.randrange(0, 3) == 1:
         PressKey(W)
@@ -103,11 +89,12 @@ def no_keys():
     ReleaseKey(D)
 
 
-model = googlenet(WIDTH, HEIGHT, 3, LR, output = 9)
-MODEL_NAME = 'base_model'
+# model = googlenet(WIDTH, HEIGHT, 3, LR, output = 5)
+model = googlenet(281,791,output=5,lr=LR)
+MODEL_NAME = 'fpp_training_data/v29'
 model.load(MODEL_NAME)
 
-print('We have loaded a previous model!!!!')
+print('Loaded Model succesfully')
 
 def main():
     last_time = time.time()
@@ -119,30 +106,17 @@ def main():
     mode_choice = 0
 
     screen = grab_screen(region = (10, 40, GAME_WIDTH, GAME_HEIGHT))
-    screen = cv2.cvtColor(screen, cv2.COLOR_BGR2RGB)
-    prev = cv2.resize(screen, (WIDTH,HEIGHT))
-
-    t_minus, t_now, t_plus = prev, prev, prev
+    screen = process_img(screen)
 
     while(True):
         if not paused:
             print('entered')
-            screen = grab_screen(region = (0, 40, GAME_WIDTH, GAME_HEIGHT + 40))
-            screen = cv2.cvtColor(screen, cv2.COLOR_BGR2RGB)
+            screen = grab_screen(region = (10, 40, GAME_WIDTH, GAME_HEIGHT))
+            screen = process_img(screen)
 
-            last_time = time.time()
-            screen = cv2.resize(screen, (WIDTH,HEIGHT))
-
-            delta_count = motion_detection(t_minus, t_now, t_plus)
-
-            t_minus = t_now
-            t_now = t_plus
-            t_plus = screen
-            t_plus = cv2.blur(t_plus, (4, 4))
-
-            prediction = model.predict([screen.reshape(WIDTH,HEIGHT, 3)])[0]
-            prediction = np.array(prediction) * np.array([1, 10000, 10000, 10000, 10000, 5000, 5000, 10000, 10000])
-
+            prediction = model.predict([screen.reshape(281,791, 1)])[0]
+            prediction = np.array(prediction)
+            print(prediction)
             mode_choice = np.argmax(prediction)
 
             if mode_choice == 0:
@@ -158,61 +132,8 @@ def main():
                 right()
                 choice_picked = 'right'
             elif mode_choice == 4:
-                forward_left()
-                choice_picked = 'forward+left'
-            elif mode_choice == 5:
-                forward_right()
-                choice_picked = 'forward+right'
-            elif mode_choice == 6:
-                reverse_left()
-                choice_picked = 'reverse+left'
-            elif mode_choice == 7:
-                reverse_right()
-                choice_picked = 'reverse+right'
-            elif mode_choice == 8:
                 no_keys()
                 choice_picked = 'nokeys'
-
-            motion_log.append(delta_count)
-            motion_avg = round(mean(motion_log), 3)
-            print('loop took {0} seconds. Motion: {1}. Choice: {2}'.format(round(time.time() - last_time, 3), motion_avg, choice_picked))
-
-            if motion_avg < motion_req and len(motion_log) >= log_len:
-                print('WERE PROBABLY STUCK FFS, initiating some evasive maneuvers.')
-
-                # 0 = reverse straight, turn left out
-                # 1 = reverse straight, turn right out
-                # 2 = reverse left, turn right out
-                # 3 = reverse right, turn left out
-
-                quick_choice = random.randrange(0, 4)
-
-                if quick_choice == 0:
-                    reverse()
-                    time.sleep(random.uniform(1, 2))
-                    forward_left()
-                    time.sleep(random.uniform(1, 2))
-
-                elif quick_choice == 1:
-                    reverse()
-                    time.sleep(random.uniform(1, 2))
-                    forward_right()
-                    time.sleep(random.uniform(1, 2))
-
-                elif quick_choice == 2:
-                    reverse_left()
-                    time.sleep(random.uniform(1, 2))
-                    forward_right()
-                    time.sleep(random.uniform(1, 2))
-
-                elif quick_choice == 3:
-                    reverse_right()
-                    time.sleep(random.uniform(1, 2))
-                    forward_left()
-                    time.sleep(random.uniform(1, 2))
-
-                for i in range(log_len - 2):
-                    del motion_log[0]
 
         keys = key_check()
 
